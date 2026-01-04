@@ -185,6 +185,10 @@ static char *parse_dos_filename(const char *name)
 
 static std::filesystem::path wildcard_match(const std::filesystem::path &origin, const std::string &pattern)
 {
+	if (!std::filesystem::exists(origin)) {
+		return "";
+	}
+
 	for (auto const &dp : std::filesystem::directory_iterator{ origin }) {
 		auto dpname = dp.path().filename().generic_string();
 

@@ -94,11 +94,15 @@ static uint16_t vga_scan_pos_y;
 static float    ntsc_half_cnt;
 static uint16_t ntsc_scan_pos_y;
 
+static uint16_t vera_line_count;
+
 static int frame_count = 0;
 static int cheat_mask  = 0;
 
 static bool log_video              = false;
 static bool shadow_safety_frame[4] = { false, false, true, true };
+
+static uint8_t redraw_events = VERA_NEW_FRAME;
 
 ////////////////////////////////////////////////////////////
 // FX registers
@@ -255,6 +259,7 @@ void vera_video_reset()
 	vga_scan_pos_y  = 0;
 	ntsc_half_cnt   = 0;
 	ntsc_scan_pos_y = 0;
+	vera_line_count = 0;
 
 	psg_reset();
 	pcm_reset();
@@ -845,10 +850,10 @@ static uint8_t calculate_line_col_index(uint8_t spr_zindex, uint8_t spr_col_inde
 	return col_index;
 }
 
-static void render_line(uint16_t y)
+static uint16_t render_line(uint16_t y, uint16_t vera_y)
 {
 	if (y >= SCREEN_HEIGHT) {
-		return;
+		return 0;
 	}
 
 	const uint8_t out_mode = reg_composer[0] & 3;
@@ -859,7 +864,7 @@ static void render_line(uint16_t y)
 	const uint16_t vstart       = reg_composer[6] << 1;
 	const uint16_t vstop        = reg_composer[7] << 1;
 
-	const int eff_y = (reg_composer[2] * (y - vstart)) >> 7;
+	const int eff_y = (reg_composer[2] * vera_y) >> 7;
 
 	const uint8_t dc_video = reg_composer[0];
 
@@ -881,7 +886,7 @@ static void render_line(uint16_t y)
 	if (vera_video_is_cheat_frame()) {
 		// sprites were needed for the collision IRQ, but we can skip
 		// everything else if we're cheating and not actually updating.
-		return;
+		return static_cast<uint16_t>(vstart <= y && y < vstop);
 	}
 
 	if (layer_line_enable[0]) {
@@ -914,6 +919,8 @@ static void render_line(uint16_t y)
 		refresh_palette();
 	}
 
+	uint16_t line_value = 1;
+
 	// If video output is enabled, calculate color indices for line.
 	if (out_mode != 0) {
 		// Add border after if required.
@@ -922,6 +929,7 @@ static void render_line(uint16_t y)
 			border_fill          = border_fill | (border_fill << 8);
 			border_fill          = border_fill | (border_fill << 16);
 			memset(col_line, border_fill, SCREEN_WIDTH);
+			line_value = 0;
 		} else {
 			const uint16_t xstart = hstart < 640 ? hstart : 640;
 			const uint16_t xstop  = hstop < 640 ? hstop : 640;
@@ -964,6 +972,8 @@ static void render_line(uint16_t y)
 			framebuffer4++;
 		}
 	}
+
+	return line_value;
 }
 
 static void update_isr_and_coll(uint16_t y, uint16_t compare)
@@ -983,22 +993,24 @@ static void update_isr_and_coll(uint16_t y, uint16_t compare)
 	}
 }
 
-bool vera_video_step(float mhz, float steps)
+uint8_t vera_video_step(float mhz, float steps)
 {
 	uint16_t y         = 0;
 	bool     ntsc_mode = reg_composer[0] & 2;
-	bool     new_frame = false;
+	uint8_t  vera_events = 0;
 	vga_scan_pos_x += PIXEL_FREQ * steps / mhz;
 	if (vga_scan_pos_x > VGA_SCAN_WIDTH) {
 		vga_scan_pos_x -= VGA_SCAN_WIDTH;
 		if (!ntsc_mode) {
-			render_line(vga_scan_pos_y - VGA_Y_OFFSET);
+			vera_line_count += render_line(vga_scan_pos_y - VGA_Y_OFFSET, vera_line_count);
+			vera_events |= VERA_NEW_LINE;
 		}
 		vga_scan_pos_y++;
 		if (vga_scan_pos_y == SCAN_HEIGHT) {
 			vga_scan_pos_y = 0;
 			if (!ntsc_mode) {
-				new_frame = true;
+				vera_line_count = 0;
+				vera_events |= VERA_NEW_FRAME;
 				frame_count++;
 			}
 		}
@@ -1013,12 +1025,14 @@ bool vera_video_step(float mhz, float steps)
 			if (ntsc_scan_pos_y < SCAN_HEIGHT) {
 				y = ntsc_scan_pos_y - NTSC_Y_OFFSET_LOW;
 				if ((y & 1) == 0) {
-					render_line(y);
+					vera_line_count += render_line(y, vera_line_count);
+					vera_events |= VERA_NEW_LINE;
 				}
 			} else {
 				y = ntsc_scan_pos_y - NTSC_Y_OFFSET_HIGH;
 				if ((y & 1) == 0) {
-					render_line(y | 1);
+					vera_line_count += render_line(y | 1, vera_line_count);
+					vera_events |= VERA_NEW_LINE;
 				}
 			}
 		}
@@ -1026,7 +1040,8 @@ bool vera_video_step(float mhz, float steps)
 		if (ntsc_scan_pos_y == SCAN_HEIGHT) {
 			reg_composer[0] |= 0x80;
 			if (ntsc_mode) {
-				new_frame = true;
+				vera_line_count = 0;
+				vera_events |= VERA_NEW_FRAME;
 				frame_count++;
 			}
 		}
@@ -1034,7 +1049,8 @@ bool vera_video_step(float mhz, float steps)
 			reg_composer[0] &= ~0x80;
 			ntsc_scan_pos_y = 0;
 			if (ntsc_mode) {
-				new_frame = true;
+				vera_line_count = 0;
+				vera_events |= VERA_NEW_FRAME;
 				frame_count++;
 			}
 		}
@@ -1048,7 +1064,7 @@ bool vera_video_step(float mhz, float steps)
 		}
 	}
 
-	return new_frame;
+	return vera_events;
 }
 
 void vera_video_force_redraw_screen()
@@ -1056,7 +1072,7 @@ void vera_video_force_redraw_screen()
 	const uint8_t old_sprite_line_collisions = sprite_line_collisions;
 
 	for (int y = 0; y < SCREEN_HEIGHT; ++y) {
-		render_line(y);
+		render_line(y, y);
 	}
 
 	sprite_line_collisions = old_sprite_line_collisions;
@@ -2338,4 +2354,18 @@ vera_video_rect vera_video_get_scan_visible()
 			VGA_Y_OFFSET, VGA_Y_OFFSET + SCREEN_HEIGHT
 		};
 	}
+}
+
+void vera_set_redraw_event(uint8_t event, bool enable)
+{
+	if (enable) {
+		redraw_events |= event;
+	} else {
+		redraw_events &= ~event;	
+	}
+}
+
+uint8_t vera_get_redraw_events()
+{
+	return redraw_events;
 }

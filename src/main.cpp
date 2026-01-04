@@ -457,7 +457,7 @@ void emulator_loop()
 		}
 		cpu_visualization_step();
 		uint8_t clocks    = (uint8_t)(clockticks6502 - old_clockticks6502);
-		bool    new_frame = vera_video_step(MHZ, clocks);
+		uint8_t video_events = vera_video_step(MHZ, clocks);
 		via1_step(clocks);
 		via2_step(clocks);
 		rtc_step(clocks);
@@ -466,9 +466,12 @@ void emulator_loop()
 		}
 		audio_render(clocks);
 
-		if (new_frame) {
+		if (video_events & VERA_NEW_FRAME) {
 			midi_process();
 			gif_recorder_update(vera_video_get_framebuffer());
+		}
+
+		if (video_events & vera_get_redraw_events()) {
 			static uint32_t last_display_us = timing_total_microseconds_realtime();
 			const uint32_t  display_us      = timing_total_microseconds_realtime();
 			if ((Options.warp_factor == 0) || (display_us - last_display_us > 16000)) { // Close enough I'm willing to pay for OpenGL's sync.

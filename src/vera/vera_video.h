@@ -18,6 +18,9 @@
 #define SCREEN_WIDTH 640
 #define SCREEN_HEIGHT 480
 
+#define VERA_NEW_LINE 1
+#define VERA_NEW_FRAME 2
+
 struct vera_video_layer_properties {
 	uint8_t  color_depth;
 	uint32_t map_base;
@@ -81,7 +84,7 @@ struct vera_video_rect {
 };
 
 void vera_video_reset(void);
-bool vera_video_step(float mhz, float cycles);
+uint8_t vera_video_step(float mhz, float cycles);
 void vera_video_force_redraw_screen();
 bool vera_video_get_irq_out(void);
 void vera_video_save(x16file *f);
@@ -196,5 +199,8 @@ float    vera_video_get_scan_pos_x();
 uint16_t vera_video_get_scan_pos_y();
 
 vera_video_rect vera_video_get_scan_visible();
+
+void vera_set_redraw_event(uint8_t event, bool enable);
+uint8_t vera_get_redraw_events();
 
 #endif

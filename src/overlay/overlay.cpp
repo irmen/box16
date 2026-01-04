@@ -3399,6 +3399,18 @@ static void draw_menu_bar()
 				ImGui::Checkbox("Palette", &Show_VERA_palette);
 				ImGui::Checkbox("Layer Settings", &Show_VERA_layers);
 				ImGui::Checkbox("Sprite Settings", &Show_VERA_sprites);
+				if (ImGui::BeginMenu("Display Timing")) {
+					auto checkbox_event = [](uint8_t event, char const *event_name) {
+						bool flag_state = vera_get_redraw_events() & event;
+						if (ImGui::Checkbox(event_name, &flag_state)) {
+							vera_set_redraw_event(event, flag_state);
+						}
+					};
+
+					checkbox_event(VERA_NEW_LINE, "New Line");
+					checkbox_event(VERA_NEW_FRAME, "New Frame");
+					ImGui::EndMenu();
+				}
 				ImGui::EndMenu();
 			}
 			ImGui::Checkbox("Monitor Console", &Show_monitor_console);

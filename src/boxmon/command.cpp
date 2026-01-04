@@ -720,6 +720,11 @@ BOXMON_COMMAND(dir, "dir")
 		return true;
 	}
 
+	if (!std::filesystem::exists(Options.fsroot_path)) {
+		boxmon_console_print(boxmon::error, fmt::format("The path \"{}\" does not exist.", Options.fsroot_path.generic_string()));
+		return true;
+	}
+
 	boxmon_console_print("Directory listing of {}", Options.fsroot_path.generic_string().c_str());
 	for (auto const &dir_entry : std::filesystem::directory_iterator{ Options.fsroot_path }) {
 		auto const relative = std::filesystem::relative(dir_entry.path(), Options.fsroot_path);
